@@ -1,0 +1,14 @@
+name: Example preset
+id: bakeryos.presets.Example
+stages:
+  - name: Apply Stage
+    triggers: ["apply"]
+    packages:
+      - name: fastfetch
+    backups:
+      - "/etc/issue"
+
+  - name: Restore Stage
+    triggers: ["unapply"]
+    restores:
+      - "/etc/issue"
