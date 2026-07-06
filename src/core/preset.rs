@@ -13,25 +13,41 @@ pub struct Package {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct GSettingsConfig {
+pub struct GSettingsConfigItem {
     pub id: String,
     pub key: String,
     pub value: String,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct DConfConfig {
+pub struct GSettingsConfig {
+    pub gsettings: Vec<GSettingsConfigItem>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct DConfConfigItem {
     pub path: String,
     pub value: String,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct EnvConfig {
+pub struct DConfConfig {
+    pub dconf: Vec<DConfConfigItem>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct EnvConfigItem {
     pub name: String,
     pub value: String,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct EnvConfig {
+    pub env: Vec<EnvConfigItem>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+#[serde(untagged)]
 pub enum SetConfig {
     GSettingsConfig(GSettingsConfig),
     DConfConfig(DConfConfig),
@@ -125,7 +141,7 @@ fn exec_command(cmd: &str, args: &[&str]) -> Result<(), String> {
 }
 
 impl Preset {
-    pub fn apply_gsettings(&self, cfg: &GSettingsConfig) -> Result<(), Error> {
+    pub fn apply_gsettings(&self, cfg: &GSettingsConfigItem) -> Result<(), Error> {
         println!(
             "[\x1b[32mINFO\x1b[0m] Setting GSettings: [{}] {} -> {}",
             cfg.id, cfg.key, cfg.value
@@ -135,7 +151,7 @@ impl Preset {
         Ok(())
     }
 
-    pub fn apply_dconf(&self, cfg: &DConfConfig) -> Result<(), Error> {
+    pub fn apply_dconf(&self, cfg: &DConfConfigItem) -> Result<(), Error> {
         println!(
             "[\x1b[32mINFO\x1b[0m] Setting DConf: {} -> {}",
             cfg.path, cfg.value
@@ -145,7 +161,7 @@ impl Preset {
         Ok(())
     }
 
-    pub fn apply_env(&self, cfg: &EnvConfig) -> Result<(), Error> {
+    pub fn apply_env(&self, cfg: &EnvConfigItem) -> Result<(), Error> {
         println!(
             "[\x1b[32mINFO\x1b[0m] Permanently writing Environment Variable: {}={}",
             cfg.name, cfg.value
@@ -269,9 +285,24 @@ impl Preset {
         let configs = stage.configs.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
         for config_enum in configs {
             match config_enum {
-                SetConfig::GSettingsConfig(cfg) => self.apply_gsettings(cfg)?,
-                SetConfig::DConfConfig(cfg) => self.apply_dconf(cfg)?,
-                SetConfig::EnvConfig(cfg) => self.apply_env(cfg)?,
+                SetConfig::GSettingsConfig(cfg) => {
+                    let gsettings = &cfg.gsettings;
+                    for f in gsettings {
+                        self.apply_gsettings(f)?;
+                    }
+                }
+                SetConfig::DConfConfig(cfg) => {
+                    let dconf = &cfg.dconf;
+                    for f in dconf {
+                        self.apply_dconf(f)?;
+                    }
+                }
+                SetConfig::EnvConfig(cfg) => {
+                    let env = &cfg.env;
+                    for f in env {
+                        self.apply_env(f)?;
+                    }
+                }
             }
         }
 

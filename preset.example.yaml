@@ -7,9 +7,13 @@ stages:
       - name: fastfetch
     backups:
       - "/etc/issue"
+    configs:
+      - env:
+        - name: HELLO
+          value: HELLO
+
 
   - name: Restore Stage
     triggers: ["unapply"]
     restores:
       - "/etc/issue"
-       
