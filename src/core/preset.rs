@@ -7,37 +7,92 @@ use std::{
 use crate::core::{backup::BackupManager, config::Config, error::Error};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-#[serde(rename_all = "camelCase")]
 pub struct Package {
     name: String,
     version: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-#[serde(rename_all = "camelCase")]
+pub struct GSettingsConfig {
+    pub id: String,
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct DConfConfig {
+    pub path: String,
+    pub value: String,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct EnvConfig {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub enum SetConfig {
+    GSettingsConfig(GSettingsConfig),
+    DConfConfig(DConfConfig),
+    EnvConfig(EnvConfig),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+pub struct Hooks {
+    pub pre_install_pkg: Option<Vec<String>>,
+    pub after_install_pkg: Option<Vec<String>>,
+    pub pre_uninstall_pkg: Option<Vec<String>>,
+    pub after_uninstall_pkg: Option<Vec<String>>,
+    pub pre_backup: Option<Vec<String>>,
+    pub after_backup: Option<Vec<String>>,
+}
+
+impl Hooks {
+    pub fn run_hook(&self, hook_name: &str) -> Result<(), Error> {
+        let scripts = match hook_name {
+            "pre_install_pkg" => self
+                .pre_install_pkg
+                .as_ref()
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]),
+
+            _ => &[],
+        };
+
+        println!("[\x1b[32mINFO\x1b[0m] Runnninng hook: {}", hook_name);
+
+        for s in scripts {
+            exec_command(s, &[]).map_err(|e| Error::HookError(e))?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct Stage {
     pub name: String,
-    pub packages: Option<Vec<Package>>,
+    pub install_packages: Option<Vec<Package>>,
+    pub uninstall_packages: Option<Vec<Package>>,
     pub continue_if_err: Option<bool>,
     pub triggers: Option<Vec<String>>,
     pub backups: Option<Vec<String>>,
     pub restores: Option<Vec<String>>,
+    pub configs: Option<Vec<SetConfig>>,
+    pub hooks: Option<Hooks>,
 }
 
 impl Stage {
     pub fn has_trigger(&self, event_name: &str) -> bool {
         self.triggers
             .as_ref()
-            .map(|vec| {
-                vec.iter()
-                    .any(|keyword| event_name.contains(keyword.as_str()))
-            })
+            .map(|vec| vec.iter().any(|keyword| keyword.as_str() == event_name))
             .unwrap_or(false)
     }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
-#[serde(rename_all = "camelCase")]
 pub struct Preset {
     pub name: String,
     pub id: String,
@@ -70,11 +125,74 @@ fn exec_command(cmd: &str, args: &[&str]) -> Result<(), String> {
 }
 
 impl Preset {
+    pub fn apply_gsettings(&self, cfg: &GSettingsConfig) -> Result<(), Error> {
+        println!(
+            "[\x1b[32mINFO\x1b[0m] Setting GSettings: [{}] {} -> {}",
+            cfg.id, cfg.key, cfg.value
+        );
+        exec_command("gsettings", &["set", &cfg.id, &cfg.key, &cfg.value])
+            .map_err(|e| Error::ConfigError(e))?;
+        Ok(())
+    }
+
+    pub fn apply_dconf(&self, cfg: &DConfConfig) -> Result<(), Error> {
+        println!(
+            "[\x1b[32mINFO\x1b[0m] Setting DConf: {} -> {}",
+            cfg.path, cfg.value
+        );
+        exec_command("dconf", &["write", &cfg.path, &cfg.value])
+            .map_err(|e| Error::ConfigError(e))?;
+        Ok(())
+    }
+
+    pub fn apply_env(&self, cfg: &EnvConfig) -> Result<(), Error> {
+        println!(
+            "[\x1b[32mINFO\x1b[0m] Permanently writing Environment Variable: {}={}",
+            cfg.name, cfg.value
+        );
+
+        let home = std::env::var("HOME").map_err(|e| Error::ConfigError(e.to_string()))?;
+        let bashrc_path = format!("{}/.bashrc", home);
+
+        use std::fs::OpenOptions;
+        use std::io::Write;
+
+        let mut file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(bashrc_path)
+            .map_err(|e| Error::ConfigError(e.to_string()))?;
+
+        writeln!(file, "export {}={}", cfg.name, cfg.value)
+            .map_err(|e| Error::ConfigError(e.to_string()))?;
+
+        Ok(())
+    }
+
     pub fn install_pkg(&self, packages: &[Package]) -> Result<(), Error> {
-        let mut args = vec!["-Sy".to_string(), "--noconfirm".to_string()];
+        let mut args = vec!["-S".to_string(), "--noconfirm".to_string()];
         let mut pkg_names: Vec<String> = packages.iter().map(|pkg| pkg.name.to_string()).collect();
         args.append(&mut pkg_names);
         let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        exec_command("pacman", &args_ref).map_err(|e| Error::PackageError(e))?;
+
+        Ok(())
+    }
+
+    pub fn uninstall_pkg(&self, packages: &[Package]) -> Result<(), Error> {
+        // -R: Remove packages
+        // -n: Remove backup configuration files (nosave)
+        // -s: Remove unneeded dependencies (recursive)
+        let mut args = vec!["-Rns".to_string(), "--noconfirm".to_string()];
+        let mut pkg_names: Vec<String> = packages.iter().map(|pkg| pkg.name.to_string()).collect();
+        args.append(&mut pkg_names);
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        println!(
+            "[\x1b[32mINFO\x1b[0m] Uninstalling packages via pacman: {:?}",
+            pkg_names
+        );
 
         exec_command("pacman", &args_ref).map_err(|e| Error::PackageError(e))?;
 
@@ -120,20 +238,59 @@ impl Preset {
     }
 
     pub fn apply_stage(&self, stage: &Stage, conf: &Config) -> Result<(), Error> {
-        let pkgs = stage.packages.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
-        if pkgs.len() > 0 {
-            self.install_pkg(pkgs)?;
+        let binding = Hooks {
+            pre_install_pkg: vec![].into(),
+            after_install_pkg: vec![].into(),
+            pre_uninstall_pkg: vec![].into(),
+            after_uninstall_pkg: vec![].into(),
+            pre_backup: vec![].into(),
+            after_backup: vec![].into(),
+        };
+        let hooks = stage.hooks.as_ref().unwrap_or(&binding);
+
+        let install_packages = stage
+            .install_packages
+            .as_ref()
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        if install_packages.len() > 0 {
+            hooks.run_hook("pre_install_pkg")?;
+            self.install_pkg(install_packages)?;
+            hooks.run_hook("after_install_pkg")?;
         }
 
         let backups = stage.backups.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
         if backups.len() > 0 {
+            hooks.run_hook("pre_backup")?;
             self.backup(backups, conf)?;
+            hooks.run_hook("after_backup")?;
+        }
+
+        let configs = stage.configs.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+        for config_enum in configs {
+            match config_enum {
+                SetConfig::GSettingsConfig(cfg) => self.apply_gsettings(cfg)?,
+                SetConfig::DConfConfig(cfg) => self.apply_dconf(cfg)?,
+                SetConfig::EnvConfig(cfg) => self.apply_env(cfg)?,
+            }
         }
 
         let restores = stage.restores.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
         if restores.len() > 0 {
             self.restore(restores, conf)?;
         }
+
+        let uninstall_packages = stage
+            .uninstall_packages
+            .as_ref()
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        if uninstall_packages.len() > 0 {
+            hooks.run_hook("pre_uninstall_pkg")?;
+            self.uninstall_pkg(uninstall_packages)?;
+            hooks.run_hook("after_uninstall_pkg")?;
+        }
+
         Ok(())
     }
 

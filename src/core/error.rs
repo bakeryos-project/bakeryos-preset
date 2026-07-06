@@ -9,6 +9,12 @@ pub enum Error {
     #[error("Invalid config: {0}")]
     InvalidConfiguration(String),
 
+    #[error("Config error: {0}")]
+    ConfigError(String),
+
+    #[error("Hook error: {0}")]
+    HookError(String),
+
     #[error("Preset error: {0}")]
     PresetError(String),
 

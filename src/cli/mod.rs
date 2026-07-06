@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::cli::apply_preset::apply_preset;
+use crate::cli::unapply_preset::unapply_preset;
 use crate::core::config::ConfigManager;
 use crate::core::{config::Config, preset::StageResult};
 use clap::{Parser, Subcommand};
@@ -29,6 +30,20 @@ enum Commands {
             long,
             value_name = "FILE_PATH",
             help = "The relative or absolute path to the preset configuration file (.yaml)"
+        )]
+        path: String,
+    },
+
+    #[command(
+        about = "Unapply a preset configuration file from the system",
+        long_about = "Reads the specified YAML preset file and rolls back or removes all system configurations and packages defined within it from the current BakeryOS instance."
+    )]
+    Unapply {
+        #[arg(
+            short,
+            long,
+            value_name = "FILE_PATH",
+            help = "The relative or absolute path to the preset configuration file (.yaml) to be unapplied"
         )]
         path: String,
     },
@@ -94,6 +109,18 @@ pub fn execute() {
             }
         }
 
+        Commands::Unapply { path } => {
+            let result = unapply_preset(&path, &mut config);
+
+            if result.as_ref().is_ok() {
+                let stage_results = result.ok().unwrap_or(vec![]);
+                print_report(&stage_results);
+            } else {
+                let err = result.err();
+                println!("Error: {:?}", err);
+            }
+        }
+
         _ => {}
     }
 
@@ -101,3 +128,4 @@ pub fn execute() {
 }
 
 mod apply_preset;
+mod unapply_preset;
