@@ -2,7 +2,7 @@
 pkgname=bakeryos-preset
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="Preset tool for BakeryOS written in Rust"
+pkgdesc="Preset tool for BakeryOS"
 arch=('x86_64')
 url="https://gitlab.com/bakeryos/bakeryos-preset"
 license=('GPL-3.0-or-later')
