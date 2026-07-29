@@ -11,6 +11,11 @@ makedepends=('cargo' 'git')
 source=()
 sha256sums=()
 
+build(){
+   cd $startdir
+   cargo build --release
+}
+
 package() {
    install -Dm755 "$startdir/target/release/bakeryos-preset" "$pkgdir/usr/bin/preset"
    install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
