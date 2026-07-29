@@ -10,6 +10,7 @@ depends=('gcc-libs' 'glibc' 'pacman')
 makedepends=('cargo' 'git')
 source=()
 sha256sums=()
+options=(!debug !strip)
 
 build(){
    cd $startdir
